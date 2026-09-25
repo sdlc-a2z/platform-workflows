@@ -66,6 +66,26 @@ jobs:
           fi
           git config --global url."https://oauth2:${MODULES_TOKEN}@github.com/".insteadOf "https://github.com/"
 
+      # Ask GitHub what the token can see, before Terraform does. A module fetch failure
+      # surfaces as "Write access to repository not granted" on a *read*, which says
+      # nothing useful — this turns it into the actual reason.
+      - name: Check the token reaches the modules repository
+        env:
+          MODULES_TOKEN: ${{ secrets.MODULES_READ_TOKEN }}
+        run: |
+          code=$(curl -s -o /tmp/resp.json -w '%{http_code}' \
+            -H "Authorization: Bearer $MODULES_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            https://api.github.com/repos/sdlc-a2z/platform-terraform-modules)
+          echo "GET /repos/sdlc-a2z/platform-terraform-modules -> $code"
+          case "$code" in
+            200) echo "✓ the token can read the modules repository" ;;
+            404) echo "::error::404 — the token cannot see sdlc-a2z/platform-terraform-modules. Usual cause: it was created with the resource owner set to a personal account rather than the sdlc-a2z organisation, or the organisation has not approved it yet." ; exit 1 ;;
+            401) echo "::error::401 — the token is invalid or expired." ; exit 1 ;;
+            403) echo "::error::403 — the token is valid but refused. If the organisation requires approval for fine-grained tokens, it is pending at https://github.com/organizations/sdlc-a2z/settings/personal-access-token-requests" ; exit 1 ;;
+            *)   echo "::error::unexpected $code" ; cat /tmp/resp.json ; exit 1 ;;
+          esac
+
       # Federation, not a key. The token lives minutes and is bound to this repository.
       - uses: google-github-actions/auth@v2
         with:
