@@ -1,0 +1,47 @@
+# The check that keeps 34 repositories honest about each other.
+#
+# Each repository's own CI proves that repository builds. Nothing proves the *graph* is
+# valid — that a service does not depend on one shipping two releases later, that no topic
+# is consumed with no producer, that a finished story left a spec behind. Those are
+# properties of the whole, so they are checked from the one repository that can see it.
+
+name: registry-check
+
+on:
+  workflow_call:
+    inputs:
+      docs-ref:
+        description: The sdlc-docs ref to validate against
+        default: main
+        type: string
+  # Also runs here on a schedule, because a repository that never changes can still be
+  # made wrong by one that does.
+  schedule:
+    - cron: '17 6 * * 1-5'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  graph:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out sdlc-docs
+        uses: actions/checkout@v4
+        with:
+          repository: sdlc-a2z/sdlc-docs
+          ref: ${{ inputs.docs-ref || 'main' }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+      - run: pip install -q pyyaml
+
+      # Everything except the skills and spec checks, which need the sibling repositories
+      # checked out. Those run in sdlc-docs' own CI where the full tree is available.
+      - name: Dependency graph
+        run: python3 tools/depmap.py --check
+
+      - name: Backlog
+        run: python3 tools/backlog.py --check
