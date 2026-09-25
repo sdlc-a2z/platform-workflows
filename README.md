@@ -115,14 +115,24 @@ when the exit code was 2.
 **`environment:`** maps to a GitHub environment, so `prod` can require a reviewer before
 apply starts while `dev` runs straight through.
 
-### The one long-lived credential
+### The one long-lived credential, and it is worse than intended
 
-`MODULES_READ_TOKEN`, a read-only token for the private `platform-terraform-modules`
-repository, because Terraform's git fetch needs a credential and federation does not help
-with GitHub. It grants read on one repository and nothing else, and the shorter-lived
-alternative needs a GitHub App. Stated here rather than glossed over, because the platform
-avoids long-lived credentials everywhere else and an unexplained exception becomes a
-precedent.
+`MODULES_READ_TOKEN` lets Terraform fetch modules from the private
+`platform-terraform-modules`. Federation does not help — it authenticates to Google, not
+to GitHub.
+
+Three narrower options were tried and each was closed off:
+
+| Wanted | Result |
+|---|---|
+| Read-only deploy key, one repository | `deploy_keys_enabled_for_repositories = false` org-wide |
+| Fine-grained token, one repository, Contents: Read-only | `404` — and the organisation exposes no approval policy through the API |
+| Classic token, `repo` scope | works — and grants **read and write across every repository the holder can reach** |
+
+The third is what is in use. That is a real widening, so it is written down here rather
+than absorbed: **`R0-WS1-009` narrows it**, by enabling deploy keys for the one repository
+or by publishing the modules. If another repository needs a credential before that lands,
+narrow this one first rather than issuing a second.
 
 ## Why there is no `registry-check.yml`
 

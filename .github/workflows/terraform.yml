@@ -47,10 +47,17 @@ jobs:
           persist-credentials: false
 
       # The modules are in a private repository, so Terraform's git fetch needs a
-      # credential. A fine-grained token scoped to that one repository with Contents:
-      # Read-only. It is long-lived, which this platform avoids elsewhere, so it is named
-      # rather than glossed — a deploy key would have been narrower and the organisation
-      # has those disabled.
+      # credential — and this one is broader than it should be.
+      #
+      # A read-only deploy key scoped to one repository was the right answer; the
+      # organisation has deploy keys disabled. A fine-grained token scoped to one
+      # repository with Contents: Read-only was the next; it returned 404, and the
+      # organisation exposes no approval policy through the API to fix that. What is left
+      # is a classic token, whose narrowest usable scope for cloning a private repository
+      # is `repo` — read *and write* across every repository the holder can reach.
+      #
+      # So this is an exception, tracked as R0-WS1-009, not a pattern to copy. If a second
+      # repository needs a credential, narrow this one first.
       #
       # oauth2 as the username, not x-access-token: the latter is for GitHub App
       # installation tokens, and with a PAT GitHub answers a *clone* with "Write access to
