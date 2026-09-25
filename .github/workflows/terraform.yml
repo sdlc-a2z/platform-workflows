@@ -80,6 +80,19 @@ jobs:
         env:
           MODULES_TOKEN: ${{ secrets.MODULES_READ_TOKEN }}
         run: |
+          # Whose token is it? An account that is not a member of the organisation sees a
+          # 404 on a private repository — identical to a scoping problem, and the usual
+          # cause when several GitHub accounts are in play.
+          who=$(curl -s -H "Authorization: Bearer $MODULES_TOKEN" https://api.github.com/user \
+                | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d.get("login", d.get("message","?")))')
+          echo "token belongs to: $who   (the organisation's only member is kasimanikandan)"
+
+          # And what kind of token — classic tokens report their scopes in a header;
+          # fine-grained ones report none, which tells them apart without printing either.
+          scopes=$(curl -s -D - -o /dev/null -H "Authorization: Bearer $MODULES_TOKEN" \
+                   https://api.github.com/user | tr -d '\r' | grep -i '^x-oauth-scopes:' || true)
+          echo "${scopes:-x-oauth-scopes: (none — this is a fine-grained token)}"
+
           code=$(curl -s -o /tmp/resp.json -w '%{http_code}' \
             -H "Authorization: Bearer $MODULES_TOKEN" \
             -H "Accept: application/vnd.github+json" \
