@@ -47,10 +47,15 @@ jobs:
           persist-credentials: false
 
       # The modules are in a private repository, so Terraform's git fetch needs a
-      # credential. A read-only deploy key scoped to that one repository: it is long-lived,
-      # which the platform avoids elsewhere, but it grants read on one repository and
-      # nothing else, and no shorter-lived option exists without running a GitHub App.
-      # Stated rather than glossed.
+      # credential. A fine-grained token scoped to that one repository with Contents:
+      # Read-only. It is long-lived, which this platform avoids elsewhere, so it is named
+      # rather than glossed — a deploy key would have been narrower and the organisation
+      # has those disabled.
+      #
+      # oauth2 as the username, not x-access-token: the latter is for GitHub App
+      # installation tokens, and with a PAT GitHub answers a *clone* with "Write access to
+      # repository not granted" — which sends you to check the token's permissions when
+      # the problem is the username in front of it.
       - name: Allow Terraform to fetch private modules
         env:
           MODULES_TOKEN: ${{ secrets.MODULES_READ_TOKEN }}
@@ -59,7 +64,7 @@ jobs:
             echo "::error::MODULES_READ_TOKEN is not set — terraform init cannot fetch platform-terraform-modules"
             exit 1
           fi
-          git config --global url."https://x-access-token:${MODULES_TOKEN}@github.com/".insteadOf "https://github.com/"
+          git config --global url."https://oauth2:${MODULES_TOKEN}@github.com/".insteadOf "https://github.com/"
 
       # Federation, not a key. The token lives minutes and is bound to this repository.
       - uses: google-github-actions/auth@v2
@@ -144,7 +149,7 @@ jobs:
       - name: Allow Terraform to fetch private modules
         env:
           MODULES_TOKEN: ${{ secrets.MODULES_READ_TOKEN }}
-        run: git config --global url."https://x-access-token:${MODULES_TOKEN}@github.com/".insteadOf "https://github.com/"
+        run: git config --global url."https://oauth2:${MODULES_TOKEN}@github.com/".insteadOf "https://github.com/"
 
       - uses: google-github-actions/auth@v2
         with:
