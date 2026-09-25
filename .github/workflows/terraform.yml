@@ -93,6 +93,16 @@ jobs:
                    https://api.github.com/user | tr -d '\r' | grep -i '^x-oauth-scopes:' || true)
           echo "${scopes:-x-oauth-scopes: (none — this is a fine-grained token)}"
 
+          # What can it actually reach? "404 on this repository" invites an argument
+          # about whether the secret is set; a list of everything the token can see ends
+          # it. jq rather than inline Python, because a here-doc inside a YAML block
+          # scalar is one indentation slip from an unparseable workflow.
+          echo "repositories this token can reach:"
+          curl -s -H "Authorization: Bearer $MODULES_TOKEN" \
+               "https://api.github.com/user/repos?per_page=100&affiliation=owner,organization_member" \
+            | jq -r 'if type == "array" then (.[].full_name | "  " + .) else "  (none — " + .message + ")" end' \
+            || echo "  (could not list)"
+
           code=$(curl -s -o /tmp/resp.json -w '%{http_code}' \
             -H "Authorization: Bearer $MODULES_TOKEN" \
             -H "Accept: application/vnd.github+json" \
