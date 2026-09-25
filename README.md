@@ -79,12 +79,14 @@ What it enforces, each because something got through without it:
   there is no signing key to leak. A tag would let the running image change with no commit
   saying so.
 
-## `registry-check.yml`
+## Why there is no `registry-check.yml`
 
-Validates the dependency graph and backlog from `sdlc-docs`. Each repository's own CI
-proves *that repository* builds; nothing proves the graph is valid — that no service
-depends on one shipping two releases later, that no topic is consumed with no producer.
-Those are properties of the whole, checked from the one place that can see it.
+There was one, calling into `sdlc-docs` to validate the dependency graph from every
+repository. It cannot work: a called workflow's `GITHUB_TOKEN` reaches only the repository
+that called it, and `sdlc-docs` is private. Minting a personal access token with read
+access to every private repository, and inheriting it into a public workflow, is a
+security decision rather than a workaround — so the check lives in `sdlc-docs`' own CI,
+which runs it on push and on a weekday schedule.
 
 ## Pin the version you call
 
