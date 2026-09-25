@@ -1,0 +1,165 @@
+# Terraform for an environment: plan on a pull request, apply on merge.
+#
+# The point is that nobody applies from a laptop. What is running is whatever main says is
+# running, and a hand-applied change shows up as drift on the next plan rather than never.
+#
+#   jobs:
+#     terraform:
+#       uses: sdlc-a2z/platform-workflows/.github/workflows/terraform.yml@v1
+#       with:
+#         working-directory: terraform/environments/dev
+#         environment: dev
+#       permissions: { contents: read, id-token: write, pull-requests: write }
+#       secrets: inherit
+
+name: terraform
+
+on:
+  workflow_call:
+    inputs:
+      working-directory:
+        required: true
+        type: string
+      environment:
+        description: Used as the GitHub environment, so prod can require a reviewer
+        required: true
+        type: string
+      terraform-version:
+        default: '1.15.6'
+        type: string
+
+jobs:
+  plan:
+    permissions:
+      contents: read
+      id-token: write
+      pull-requests: write
+    runs-on: ubuntu-latest
+    outputs:
+      exitcode: ${{ steps.plan.outputs.exitcode }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # The modules are in a private repository, so Terraform's git fetch needs a
+      # credential. A read-only deploy key scoped to that one repository: it is long-lived,
+      # which the platform avoids elsewhere, but it grants read on one repository and
+      # nothing else, and no shorter-lived option exists without running a GitHub App.
+      # Stated rather than glossed.
+      - name: Allow Terraform to fetch private modules
+        env:
+          MODULES_TOKEN: ${{ secrets.MODULES_READ_TOKEN }}
+        run: |
+          if [ -z "$MODULES_TOKEN" ]; then
+            echo "::error::MODULES_READ_TOKEN is not set — terraform init cannot fetch platform-terraform-modules"
+            exit 1
+          fi
+          git config --global url."https://x-access-token:${MODULES_TOKEN}@github.com/".insteadOf "https://github.com/"
+
+      # Federation, not a key. The token lives minutes and is bound to this repository.
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.CI_SERVICE_ACCOUNT }}
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ inputs.terraform-version }}
+          terraform_wrapper: false
+
+      - name: Format
+        working-directory: ${{ inputs.working-directory }}
+        run: terraform fmt -check -recursive
+
+      - name: Init
+        working-directory: ${{ inputs.working-directory }}
+        run: terraform init -input=false
+
+      - name: Validate
+        working-directory: ${{ inputs.working-directory }}
+        run: terraform validate
+
+      # -detailed-exitcode: 0 no changes, 1 error, 2 changes. Distinguishing "no changes"
+      # from "changes" is what makes drift visible — a plan that always exits 0 says
+      # nothing about whether the world matches the code.
+      - name: Plan
+        id: plan
+        working-directory: ${{ inputs.working-directory }}
+        run: |
+          set +e
+          terraform plan -input=false -no-color -lock-timeout=5m -out=tfplan -detailed-exitcode > plan.txt 2>&1
+          code=$?
+          set -e
+          tail -c 60000 plan.txt
+          echo "exitcode=$code" >> "$GITHUB_OUTPUT"
+          [ "$code" -eq 1 ] && exit 1 || exit 0
+
+      - name: Post the plan to the pull request
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const plan = fs.readFileSync('${{ inputs.working-directory }}/plan.txt', 'utf8');
+            // GitHub rejects a comment over 65536 characters, and a rejected comment is a
+            // plan nobody reviewed.
+            const body = plan.length > 60000
+              ? plan.slice(0, 60000) + '\n\n…truncated. Read the full plan in the job log.'
+              : plan;
+            await github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `### Terraform plan — \`${{ inputs.environment }}\`\n\n<details><summary>Show</summary>\n\n\`\`\`hcl\n${body}\n\`\`\`\n\n</details>`
+            });
+
+      - name: Keep the plan for apply
+        if: github.ref == 'refs/heads/main' && steps.plan.outputs.exitcode == '2'
+        uses: actions/upload-artifact@v4
+        with:
+          name: tfplan-${{ inputs.environment }}
+          path: ${{ inputs.working-directory }}/tfplan
+          retention-days: 1
+
+  apply:
+    needs: plan
+    if: github.ref == 'refs/heads/main' && needs.plan.outputs.exitcode == '2'
+    # A GitHub environment, so prod can require a reviewer before this job starts. dev has
+    # no rule and applies straight through.
+    environment: ${{ inputs.environment }}
+    permissions:
+      contents: read
+      id-token: write
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Allow Terraform to fetch private modules
+        env:
+          MODULES_TOKEN: ${{ secrets.MODULES_READ_TOKEN }}
+        run: git config --global url."https://x-access-token:${MODULES_TOKEN}@github.com/".insteadOf "https://github.com/"
+
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.CI_SERVICE_ACCOUNT }}
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ inputs.terraform-version }}
+          terraform_wrapper: false
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: tfplan-${{ inputs.environment }}
+          path: ${{ inputs.working-directory }}
+
+      - name: Init
+        working-directory: ${{ inputs.working-directory }}
+        run: terraform init -input=false
+
+      # The saved plan, not a fresh one. Applying a re-planned change means applying
+      # something nobody reviewed — the whole point of the pull request was that specific
+      # set of actions.
+      - name: Apply
+        working-directory: ${{ inputs.working-directory }}
+        run: terraform apply -input=false -lock-timeout=5m tfplan

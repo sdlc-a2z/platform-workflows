@@ -79,6 +79,51 @@ What it enforces, each because something got through without it:
   there is no signing key to leak. A tag would let the running image change with no commit
   saying so.
 
+## `terraform.yml`
+
+Plan on a pull request, apply on merge. Nobody applies from a laptop, so what is running
+is whatever `main` says is running — and a hand-applied change shows up as drift on the
+next plan rather than never.
+
+```yaml
+jobs:
+  terraform:
+    uses: sdlc-a2z/platform-workflows/.github/workflows/terraform.yml@v1
+    with:
+      working-directory: terraform/environments/dev
+      environment: dev
+    permissions:
+      contents: read
+      id-token: write
+      pull-requests: write
+    secrets: inherit
+```
+
+**Authentication is federated, not a key.** A service-account JSON key in a GitHub secret
+never expires and can be read by any step that runs after it — exactly what HLD §10.3 says
+must not exist. Federation issues a token that lives minutes and is bound to one
+repository. The provider's `attribute_condition` names the repositories allowed to use it;
+without one, any GitHub repository anywhere can present a token.
+
+**Apply uses the saved plan, not a fresh one.** Re-planning at apply time means applying
+something nobody reviewed — the pull request approved *that* set of actions.
+
+**`-detailed-exitcode`** distinguishes "no changes" from "changes". A plan that always
+exits 0 says nothing about whether the world still matches the code, and `apply` only runs
+when the exit code was 2.
+
+**`environment:`** maps to a GitHub environment, so `prod` can require a reviewer before
+apply starts while `dev` runs straight through.
+
+### The one long-lived credential
+
+`MODULES_READ_TOKEN`, a read-only token for the private `platform-terraform-modules`
+repository, because Terraform's git fetch needs a credential and federation does not help
+with GitHub. It grants read on one repository and nothing else, and the shorter-lived
+alternative needs a GitHub App. Stated here rather than glossed over, because the platform
+avoids long-lived credentials everywhere else and an unexplained exception becomes a
+precedent.
+
 ## Why there is no `registry-check.yml`
 
 There was one, calling into `sdlc-docs` to validate the dependency graph from every
