@@ -1,24 +1,15 @@
-# The shared build for every Go service. Called, not copied.
+# The shared test gates for every Go service. Called, not copied.
 #
-# This file is public so repositories on a Free organisation can call it; GitHub only
-# shares reusable workflows from private repositories on Team or Enterprise. Nothing
-# secret lives here and nothing should be added: secrets are referenced by *name* and
-# their values are injected at run time from the calling repository's own store, which
-# stays private. The Postgres credentials below are for a container that exists for the
-# length of one job.
+# This file is public on purpose: GitHub shares reusable workflows from a private
+# repository only with organisations on Team or Enterprise, and sdlc-a2z is on Free.
+# Nothing secret is here and nothing should be added — secrets are referenced by *name*
+# and their values are injected at run time from the calling repository's own store.
 #
-# Twenty services copying a workflow means twenty places to fix a bad gate and twenty
-# chances to miss one. The gates here — coverage, vulnerabilities, a signed image — are
-# the ones that stop something reaching production, so they belong in one file.
-#
-# A service consumes it in under twenty lines:
-#
-#   jobs:
-#     build:
-#       uses: sdlc-a2z/platform-infra/.github/workflows/service-ci.yml@main
-#       with:
-#         service: job-service
-#       secrets: inherit
+# Building and signing the image lives in service-image.yml rather than being a job here,
+# and that is not tidiness: GitHub validates every job's `permissions` in a called
+# workflow against the caller, including a job whose `if` will skip it. With the image job
+# in this file, a library that never builds an image still had to grant `id-token: write`
+# just to start.
 
 name: service-ci
 
@@ -30,39 +21,22 @@ on:
         required: true
         type: string
       go-version:
-        # 1.25 is a floor set by the dependency graph, not a preference: otelgrpc and grpc
-        # both declare go 1.25.0, so anything lower will not build.
+        # A floor set by the dependency graph, not a preference: otelgrpc and grpc both
+        # declare go 1.25.0, so anything lower will not build.
         default: '1.25'
         type: string
       coverage-threshold:
-        # The Definition of Done says 80% on new domain logic. R0-WS2-002 shipped at 61.5%
-        # with its whole interceptor chain untested, which is why this is a gate.
+        # The Definition of Done. R0-WS2-002 shipped at 61.5% with its whole interceptor
+        # chain untested, which is why this is a gate rather than a habit.
         default: 80
         type: number
       needs-postgres:
-        description: Start Postgres and create the unprivileged role the tenancy suite needs
+        description: Start Postgres and the unprivileged role the tenancy suite needs
         default: true
         type: boolean
-      push-image:
-        description: Build, sign and push an image. Libraries set this false.
-        default: true
-        type: boolean
-      registry:
-        description: Full image path, e.g. <host>/<project>/<repo>
-        # Passed in rather than defaulted, so this public repository names no
-        # infrastructure. The caller knows its own registry.
-        required: true
-        type: string
-      registry-host:
-        description: Registry host alone, for the docker login
-        required: true
-        type: string
 
 jobs:
   test:
-    # Per job, not workflow-wide. A reusable workflow cannot be granted permissions its
-    # caller does not hold, so requesting id-token: write here would make every caller —
-    # including libraries that never build an image — declare it or fail to start.
     permissions:
       contents: read
     runs-on: ubuntu-latest
@@ -71,12 +45,13 @@ jobs:
         image: postgres:16-alpine
         env:
           POSTGRES_USER: sdlc
-          # Not a secret. This container lives for the length of one job, listens only on
-          # the runner's loopback, and is destroyed with it. Real credentials come from
-          # Secret Manager through the CSI driver and never appear in a workflow file.
+          # Not a secret. This container lives for the length of one job, listens on the
+          # runner's loopback, and is destroyed with it. Real credentials come from Secret
+          # Manager through the CSI driver and never appear in a workflow file.
           POSTGRES_PASSWORD: ephemeral-ci-only
           POSTGRES_DB: sdlc
-        ports: ['5442:5432']
+        ports:
+          - 5442:5432
         options: >-
           --health-cmd "pg_isready -U sdlc -d sdlc"
           --health-interval 2s --health-timeout 3s --health-retries 20
@@ -92,8 +67,7 @@ jobs:
         run: test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
 
       # A workflow that does not parse never runs, and GitHub reports that as a
-      # zero-second "startup failure" with no log. platform-contracts carried an invalid
-      # workflow for weeks without anyone knowing, because no repository had a remote.
+      # zero-second failure with no log. One sat undetected in this platform for weeks.
       - name: Lint workflows
         run: go run github.com/rhysd/actionlint/cmd/actionlint@latest
 
@@ -104,7 +78,8 @@ jobs:
       # pass while proving nothing, which is the commonest way such a suite lies.
       - name: Create the unprivileged test role
         if: inputs.needs-postgres
-        env: { PGPASSWORD: ephemeral-ci-only }
+        env:
+          PGPASSWORD: ephemeral-ci-only
         run: |
           psql -h localhost -p 5442 -U sdlc -d sdlc -v ON_ERROR_STOP=1 -c \
             "DO \$\$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='platform_lib_app') \
@@ -131,68 +106,6 @@ jobs:
             }
 
       # A CVE in a shared library reaches every service that imports it. GO-2026-6443, a
-      # remotely triggerable gRPC server panic, was sitting in the first version pinned.
+      # remotely triggerable gRPC server panic, was in the first version pinned.
       - name: Known vulnerabilities
         run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
-
-  image:
-    needs: test
-    if: inputs.push-image && github.ref == 'refs/heads/main'
-    # A caller that pushes images must declare these itself:
-    #
-    #   permissions: { contents: read, id-token: write, packages: write }
-    #
-    # id-token is what makes cosign signing keyless — the signature is bound to this
-    # workflow's identity, so there is no signing key to leak.
-    permissions:
-      contents: read
-      id-token: write
-      packages: write
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: docker/setup-buildx-action@v3
-      - uses: sigstore/cosign-installer@v3
-      - uses: anchore/sbom-action@v0
-
-      # id and token_format are both required: without the id the login step cannot
-      # reference the output, and without token_format the action mints no access token.
-      - name: Authenticate to Artifact Registry
-        id: auth
-        uses: google-github-actions/auth@v2
-        with:
-          token_format: access_token
-          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
-          service_account: ${{ secrets.CI_SERVICE_ACCOUNT }}
-
-      - uses: docker/login-action@v3
-        with:
-          registry: ${{ inputs.registry-host }}
-          username: oauth2accesstoken
-          password: ${{ steps.auth.outputs.access_token }}
-
-      # Pushed and referenced by digest, never by tag. Argo deploys a release train of
-      # digests, and a tag would let the running image change with no commit saying so.
-      - name: Build and push
-        id: build
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: deploy/Dockerfile
-          push: true
-          tags: ${{ inputs.registry }}/${{ inputs.service }}:${{ github.sha }}
-          build-args: VERSION=${{ github.sha }}
-          provenance: true
-          sbom: true
-
-      # Keyless: the signature is bound to this workflow's identity, so there is no signing
-      # key to leak. Binary Authorization admits only images carrying one.
-      - name: Sign the digest
-        run: cosign sign --yes "${{ inputs.registry }}/${{ inputs.service }}@${{ steps.build.outputs.digest }}"
-
-      - name: Record the digest
-        run: |
-          echo "### ${{ inputs.service }}" >> "$GITHUB_STEP_SUMMARY"
-          echo '`${{ steps.build.outputs.digest }}`' >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "Add this digest to the release train in platform-deploy." >> "$GITHUB_STEP_SUMMARY"

@@ -33,16 +33,35 @@ jobs:
     uses: sdlc-a2z/platform-workflows/.github/workflows/service-ci.yml@v1
     with:
       service: job-service
+    secrets: inherit
+```
+
+## `service-image.yml`
+
+Building and signing the image is a **separate** workflow, and that split is not tidiness.
+GitHub validates every job's `permissions` in a called workflow against the caller —
+including a job whose `if` will skip it. With the image job inside `service-ci.yml`, a
+library that never builds an image still had to grant `id-token: write` just to start, and
+every call failed with a zero-second startup failure and no log.
+
+A service that ships an image adds:
+
+```yaml
+  image:
+    needs: build
+    uses: sdlc-a2z/platform-workflows/.github/workflows/service-image.yml@v1
+    with:
+      service: job-service
       registry: <host>/<project>/<repo>
       registry-host: <host>
-    permissions:          # only if push-image is true
+    permissions:
       contents: read
       id-token: write
       packages: write
     secrets: inherit
 ```
 
-A library sets `push-image: false` and needs no permissions block.
+A library calls only `service-ci.yml` and grants nothing.
 
 What it enforces, each because something got through without it:
 
