@@ -115,24 +115,21 @@ when the exit code was 2.
 **`environment:`** maps to a GitHub environment, so `prod` can require a reviewer before
 apply starts while `dev` runs straight through.
 
-### The one long-lived credential, and it is worse than intended
+### No credential for the modules
 
-`MODULES_READ_TOKEN` lets Terraform fetch modules from the private
-`platform-terraform-modules`. Federation does not help — it authenticates to Google, not
-to GitHub.
+`platform-terraform-modules` is public, so `terraform init` fetches it with nothing.
 
-Three narrower options were tried and each was closed off:
+It was private, and three attempts at a narrow credential each closed off: a read-only
+deploy key (`deploy_keys_enabled_for_repositories = false` org-wide), a fine-grained token
+(404, six rounds, and no approval policy exposed through the API), and a classic token
+(works, but grants read *and write* across every repository its holder can reach — to
+clone one repository read-only).
 
-| Wanted | Result |
-|---|---|
-| Read-only deploy key, one repository | `deploy_keys_enabled_for_repositories = false` org-wide |
-| Fine-grained token, one repository, Contents: Read-only | `404` — and the organisation exposes no approval policy through the API |
-| Classic token, `repo` scope | works — and grants **read and write across every repository the holder can reach** |
-
-The third is what is in use. That is a real widening, so it is written down here rather
-than absorbed: **`R0-WS1-009` narrows it**, by enabling deploy keys for the one repository
-or by publishing the modules. If another repository needs a credential before that lands,
-narrow this one first rather than issuing a second.
+At that point the credential was costing more than the privacy bought. The modules hold no
+deployment-specific values: every address, project and hostname is an input supplied by
+the caller, which stays private. What is public is the shape — four network zones, which
+may reach which, and that a sandbox is denied the metadata server. A firewall rule is not
+weaker for being readable; it is weaker if it is wrong.
 
 ## Why there is no `registry-check.yml`
 

@@ -46,75 +46,14 @@ jobs:
           # looks like the wrong token rather than the wrong precedence.
           persist-credentials: false
 
-      # The modules are in a private repository, so Terraform's git fetch needs a
-      # credential — and this one is broader than it should be.
+      # No credential is needed to fetch the modules: platform-terraform-modules is
+      # public. It holds no deployment-specific values — every address, project and
+      # hostname is an input, supplied by the caller, which is private.
       #
-      # A read-only deploy key scoped to one repository was the right answer; the
-      # organisation has deploy keys disabled. A fine-grained token scoped to one
-      # repository with Contents: Read-only was the next; it returned 404, and the
-      # organisation exposes no approval policy through the API to fix that. What is left
-      # is a classic token, whose narrowest usable scope for cloning a private repository
-      # is `repo` — read *and write* across every repository the holder can reach.
-      #
-      # So this is an exception, tracked as R0-WS1-009, not a pattern to copy. If a second
-      # repository needs a credential, narrow this one first.
-      #
-      # oauth2 as the username, not x-access-token: the latter is for GitHub App
-      # installation tokens, and with a PAT GitHub answers a *clone* with "Write access to
-      # repository not granted" — which sends you to check the token's permissions when
-      # the problem is the username in front of it.
-      - name: Allow Terraform to fetch private modules
-        env:
-          MODULES_TOKEN: ${{ secrets.MODULES_READ_TOKEN }}
-        run: |
-          if [ -z "$MODULES_TOKEN" ]; then
-            echo "::error::MODULES_READ_TOKEN is not set — terraform init cannot fetch platform-terraform-modules"
-            exit 1
-          fi
-          git config --global url."https://oauth2:${MODULES_TOKEN}@github.com/".insteadOf "https://github.com/"
-
-      # Ask GitHub what the token can see, before Terraform does. A module fetch failure
-      # surfaces as "Write access to repository not granted" on a *read*, which says
-      # nothing useful — this turns it into the actual reason.
-      - name: Check the token reaches the modules repository
-        env:
-          MODULES_TOKEN: ${{ secrets.MODULES_READ_TOKEN }}
-        run: |
-          # Whose token is it? An account that is not a member of the organisation sees a
-          # 404 on a private repository — identical to a scoping problem, and the usual
-          # cause when several GitHub accounts are in play.
-          who=$(curl -s -H "Authorization: Bearer $MODULES_TOKEN" https://api.github.com/user \
-                | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d.get("login", d.get("message","?")))')
-          echo "token belongs to: $who   (the organisation's only member is kasimanikandan)"
-
-          # And what kind of token — classic tokens report their scopes in a header;
-          # fine-grained ones report none, which tells them apart without printing either.
-          scopes=$(curl -s -D - -o /dev/null -H "Authorization: Bearer $MODULES_TOKEN" \
-                   https://api.github.com/user | tr -d '\r' | grep -i '^x-oauth-scopes:' || true)
-          echo "${scopes:-x-oauth-scopes: (none — this is a fine-grained token)}"
-
-          # What can it actually reach? "404 on this repository" invites an argument
-          # about whether the secret is set; a list of everything the token can see ends
-          # it. jq rather than inline Python, because a here-doc inside a YAML block
-          # scalar is one indentation slip from an unparseable workflow.
-          echo "repositories this token can reach:"
-          curl -s -H "Authorization: Bearer $MODULES_TOKEN" \
-               "https://api.github.com/user/repos?per_page=100&affiliation=owner,organization_member" \
-            | jq -r 'if type == "array" then (.[].full_name | "  " + .) else "  (none — " + .message + ")" end' \
-            || echo "  (could not list)"
-
-          code=$(curl -s -o /tmp/resp.json -w '%{http_code}' \
-            -H "Authorization: Bearer $MODULES_TOKEN" \
-            -H "Accept: application/vnd.github+json" \
-            https://api.github.com/repos/sdlc-a2z/platform-terraform-modules)
-          echo "GET /repos/sdlc-a2z/platform-terraform-modules -> $code"
-          case "$code" in
-            200) echo "✓ the token can read the modules repository" ;;
-            404) echo "::error::404 — the token cannot see sdlc-a2z/platform-terraform-modules. Usual cause: it was created with the resource owner set to a personal account rather than the sdlc-a2z organisation, or the organisation has not approved it yet." ; exit 1 ;;
-            401) echo "::error::401 — the token is invalid or expired." ; exit 1 ;;
-            403) echo "::error::403 — the token is valid but refused. If the organisation requires approval for fine-grained tokens, it is pending at https://github.com/organizations/sdlc-a2z/settings/personal-access-token-requests" ; exit 1 ;;
-            *)   echo "::error::unexpected $code" ; cat /tmp/resp.json ; exit 1 ;;
-          esac
+      # It was private, and three attempts at a narrow credential failed: deploy keys are
+      # disabled across the organisation, and fine-grained tokens cost six rounds. The
+      # organisation's posture reads as no long-lived git credentials; publishing the
+      # pattern and keeping the addresses agrees with that rather than routing around it.
 
       # Federation, not a key. The token lives minutes and is bound to this repository.
       - uses: google-github-actions/auth@v2
@@ -195,11 +134,6 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-
-      - name: Allow Terraform to fetch private modules
-        env:
-          MODULES_TOKEN: ${{ secrets.MODULES_READ_TOKEN }}
-        run: git config --global url."https://oauth2:${MODULES_TOKEN}@github.com/".insteadOf "https://github.com/"
 
       - uses: google-github-actions/auth@v2
         with:
