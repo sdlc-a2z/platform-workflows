@@ -39,6 +39,12 @@ jobs:
       exitcode: ${{ steps.plan.outputs.exitcode }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          # checkout otherwise leaves its own token as an extraheader for
+          # https://github.com/, which overrides the rewrite below — and that token cannot
+          # read a private sibling repository, so Terraform's module fetch gets a 403 that
+          # looks like the wrong token rather than the wrong precedence.
+          persist-credentials: false
 
       # The modules are in a private repository, so Terraform's git fetch needs a
       # credential. A read-only deploy key scoped to that one repository: it is long-lived,
@@ -132,6 +138,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Allow Terraform to fetch private modules
         env:
