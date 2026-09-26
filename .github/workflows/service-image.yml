@@ -82,11 +82,19 @@ jobs:
       - name: Sign the digest
         run: cosign sign --yes "${{ inputs.registry }}/${{ inputs.service }}@${{ steps.build.outputs.digest }}"
 
+      # Values reach the script through `env:`, not by interpolating `${{ }}` into it.
+      # A `${{ }}` in a `run:` block is textual substitution performed before the shell
+      # sees the line, so a value containing a quote or a `$(` becomes script. Neither
+      # of these is attacker-controlled, but the safe shape costs nothing and this is
+      # the repository other workflows are copied from.
       - name: Record the digest
+        env:
+          SERVICE: ${{ inputs.service }}
+          DIGEST: ${{ steps.build.outputs.digest }}
         run: |
           {
-            echo "### ${{ inputs.service }}"
-            echo '`${{ steps.build.outputs.digest }}`'
+            echo "### $SERVICE"
+            echo "\`$DIGEST\`"
             echo ""
             echo "Add this digest to the release train in platform-deploy."
           } >> "$GITHUB_STEP_SUMMARY"
