@@ -1,0 +1,49 @@
+name: ci
+
+# This repository holds nothing but workflow YAML, and every repository in the polyrepo
+# calls it. A bad commit here does not break one build; it breaks all of them, at startup,
+# with no log to read. That asymmetry is the whole case for this file.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# Public repository, no build, no registry, no cloud. Read is all it needs.
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with: { go-version: '1.25' }
+
+      # `go install` resolves through the module checksum database. The upstream
+      # download script verifies nothing, and this repository is the one place where a
+      # substituted binary would be reviewing everyone else's workflows.
+      - name: Install actionlint
+        run: go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
+
+      # The failure this job exists for. A workflow that does not parse never runs, and
+      # GitHub reports that as a zero-second startup failure — no jobs, no annotation,
+      # no log. platform-contracts carried one for weeks precisely because nothing said
+      # anything. actionlint also runs shellcheck over every `run:` block, which is
+      # preinstalled on this runner.
+      - name: actionlint
+        run: actionlint -color
+
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+
+      - name: Install PyYAML
+        run: pip install --quiet pyyaml==6.0.2
+
+      # What actionlint cannot see: whether a workflow here is callable at all, and
+      # whether the README — which is where eleven repositories copy their call block
+      # from — still names the inputs these workflows actually declare.
+      - name: Reusable workflows are callable, and the README matches them
+        run: python tools/check-workflows.py
