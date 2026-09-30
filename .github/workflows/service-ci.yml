@@ -76,6 +76,7 @@ jobs:
         env:
           CONTRACTS_READ_TOKEN: ${{ secrets.CONTRACTS_READ_TOKEN }}
         run: |
+          echo "token length: ${#CONTRACTS_READ_TOKEN}"
           if [ -n "$CONTRACTS_READ_TOKEN" ]; then
             git config --global "url.https://x-access-token:${CONTRACTS_READ_TOKEN}@github.com/sdlc-a2z/platform-contracts.insteadOf" "https://github.com/sdlc-a2z/platform-contracts"
             echo "GOPRIVATE=github.com/sdlc-a2z/platform-contracts" >> "$GITHUB_ENV"
