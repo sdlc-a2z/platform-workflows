@@ -72,11 +72,17 @@ jobs:
       # catches this at lint time, not just at a run silently doing nothing. Silent no-op
       # when the secret is not set, so this costs nothing to the many callers that do not
       # import platform-contracts.
+      #
+      # CONTRACTS_READ_TOKEN must be set per-repository, not as an org secret: on GitHub
+      # Free, an organization secret is never visible to a private repository regardless
+      # of its visibility setting — it only reaches public repos on this plan. Confirmed
+      # live: set org-wide with visibility "all", still arrived here as an empty string.
+      # Same shape as WIF_PROVIDER/CI_SERVICE_ACCOUNT, which are repo secrets for the
+      # same reason.
       - name: Private module access
         env:
           CONTRACTS_READ_TOKEN: ${{ secrets.CONTRACTS_READ_TOKEN }}
         run: |
-          echo "token length: ${#CONTRACTS_READ_TOKEN}"
           if [ -n "$CONTRACTS_READ_TOKEN" ]; then
             git config --global "url.https://x-access-token:${CONTRACTS_READ_TOKEN}@github.com/sdlc-a2z/platform-contracts.insteadOf" "https://github.com/sdlc-a2z/platform-contracts"
             echo "GOPRIVATE=github.com/sdlc-a2z/platform-contracts" >> "$GITHUB_ENV"
