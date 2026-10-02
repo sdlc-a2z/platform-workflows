@@ -83,7 +83,14 @@ jobs:
 
       # pip-audit, Python's equivalent of govulncheck: a CVE in a shared dependency reaches
       # every service that imports it, the same reasoning service-ci.yml's own check names.
+      #
+      # No --strict: that flag fails the whole audit if *any* package cannot be resolved
+      # against PyPI's advisory database — which aisdlc-platform-lib (and the service's own
+      # editable install) never can be, being private to this org. `--strict` would fail
+      # every Python service's CI unconditionally, forever, on its very first run. Found
+      # live (R0-WS1-003): a real private dependency is the normal case here, not an edge
+      # case, unlike the Go ecosystem govulncheck was modeled on.
       - name: Known vulnerabilities
         run: |
           uv pip install --python .venv/bin/python pip-audit
-          .venv/bin/python -m pip_audit --strict
+          .venv/bin/python -m pip_audit --skip-editable
