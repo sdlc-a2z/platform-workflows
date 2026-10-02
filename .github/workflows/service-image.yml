@@ -38,6 +38,19 @@ on:
           image (e.g. the real app and a docs/tooling image) under different names.
         default: deploy/Dockerfile
         type: string
+      python-index-host:
+        description: >
+          Bare host+path (no scheme, no credentials) of a private Python package index
+          the Dockerfile's build stage needs, e.g.
+          <region>-python.pkg.dev/<project>/<repo>/simple/. Passed as the
+          PYTHON_INDEX_HOST build arg; the registry access token already fetched below is
+          passed alongside it as the `gar_token` build secret, not a build arg, so it
+          never lands in the image's build history. Leave empty for a Dockerfile with no
+          such dependency — an input, not a default, for the same reason `registry` is
+          one: this repository is public and names no infrastructure.
+        required: false
+        default: ''
+        type: string
 
 jobs:
   image:
@@ -79,7 +92,15 @@ jobs:
           file: ${{ inputs.dockerfile }}
           push: true
           tags: ${{ inputs.registry }}/${{ inputs.service }}:${{ github.sha }}
-          build-args: VERSION=${{ github.sha }}
+          build-args: |
+            VERSION=${{ github.sha }}
+            PYTHON_INDEX_HOST=${{ inputs.python-index-host }}
+          # Reuses the same token the registry login above already fetched — Artifact
+          # Registry's Docker and Python surfaces authenticate the same identity the same
+          # way, so this needs no second auth step. A no-op (empty secret value) when
+          # python-index-host is empty; the Dockerfile ignores an empty/absent secret.
+          secrets: |
+            gar_token=${{ steps.auth.outputs.access_token }}
           provenance: true
           sbom: true
 

@@ -91,6 +91,11 @@ A service that ships an image adds:
       # dockerfile: deploy/Dockerfile   # optional, this is the default — set it when a
       #                                 # repository builds more than one image under
       #                                 # different names (e.g. web's Storybook image)
+      # python-index-host: <region>-python.pkg.dev/<project>/<repo>/simple/
+      #   # optional — only for a Dockerfile installing a private Python package
+      #   # (aisdlc-platform-lib). The access token already fetched below is passed to the
+      #   # build as the `gar_token` secret, so the Dockerfile authenticates without a
+      #   # second credential and without the token landing in build history.
     permissions:
       contents: read
       id-token: write
