@@ -1,0 +1,89 @@
+# The shared build for a Python service. Companion to service-ci.yml (Go) — a separate
+# file, not a branch inside it, for the same reason service-image.yml is separate: a
+# caller's required permissions should match what it actually does.
+#
+# R0-WS1-003: service-template-python's generated services called service-ci.yml (the Go
+# workflow — setup-go, `go build`, `go vet`, `go test`) because no Python equivalent
+# existed. Every generated Python service's CI would have failed immediately on the wrong
+# toolchain. Found live, trying to actually time a generated service reaching dev, not in
+# review.
+#
+# id-token: write is not optional here the way it is for service-image.yml: a Python
+# service that depends on aisdlc-platform-lib (ADR-0010 — private to this org, published to
+# a GAR Python repository, not PyPI) needs a federated credential just to install its own
+# dependencies, before any image is built. Go has no equivalent cost: platform-lib-go
+# resolves from git history at a tag, not from a registry.
+
+name: service-ci-python
+
+on:
+  workflow_call:
+    inputs:
+      service:
+        description: Service name, matching its registry entry
+        required: true
+        type: string
+      python-version:
+        default: '3.12'
+        type: string
+      python-index-url:
+        description: >
+          Extra index URL for a private Python dependency (e.g. aisdlc-platform-lib),
+          including the oauth2accesstoken username GAR's keyring backend needs:
+          https://oauth2accesstoken@<region>-python.pkg.dev/<project>/<repo>/simple/.
+          An input, not a default — this repository is public and names no
+          infrastructure. Leave empty for a service with no private Python dependency.
+        required: false
+        default: ''
+        type: string
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      # Skipped entirely when there is nothing private to read, so a service with no
+      # GAR dependency never has to grant id-token: write to get past this step.
+      - name: Authenticate to GCP
+        if: inputs.python-index-url != ''
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.CI_SERVICE_ACCOUNT }}
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: ${{ inputs.python-version }}
+
+      # --clear: setup-uv already created .venv and exported VIRTUAL_ENV, so a plain
+      # `uv venv` fails with "a virtual environment already exists".
+      #
+      # `uv`'s keyring integration shells out to a `keyring` executable on PATH — the
+      # package alone is not enough (the exact gap found live in R0-WS1-003; see this
+      # template's own Makefile for the longer version of this comment).
+      - name: Install
+        env:
+          UV_EXTRA_INDEX_URL: ${{ inputs.python-index-url }}
+          UV_KEYRING_PROVIDER: subprocess
+        run: |
+          uv venv --clear .venv
+          if [ -n "$UV_EXTRA_INDEX_URL" ]; then
+            pip install -q keyring keyrings.google-artifactregistry-auth
+            uv pip install --python .venv/bin/python --keyring-provider subprocess -e '.[dev]'
+          else
+            uv pip install --python .venv/bin/python -e '.[dev]'
+          fi
+
+      - name: Check
+        run: make check
+
+      # pip-audit, Python's equivalent of govulncheck: a CVE in a shared dependency reaches
+      # every service that imports it, the same reasoning service-ci.yml's own check names.
+      - name: Known vulnerabilities
+        run: |
+          uv pip install --python .venv/bin/python pip-audit
+          .venv/bin/python -m pip_audit --strict

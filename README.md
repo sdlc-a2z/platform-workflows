@@ -36,6 +36,40 @@ jobs:
     secrets: inherit
 ```
 
+## `service-ci-python.yml`
+
+The shared build for a Python service — a separate file from `service-ci.yml`, not a
+branch inside it, because the two need different `permissions` up front: a Python service
+that depends on `aisdlc-platform-lib` (private to this org, ADR-0010 — no PyPI) needs
+`id-token: write` just to install its own dependencies, before anything is built or
+pushed. Go has no equivalent cost; `platform-lib-go` resolves from git history at a tag.
+
+```yaml
+jobs:
+  build:
+    uses: sdlc-a2z/platform-workflows/.github/workflows/service-ci-python.yml@v1
+    with:
+      service: job-service
+      # Omit entirely for a service with no private Python dependency.
+      python-index-url: https://oauth2accesstoken@<region>-python.pkg.dev/<project>/<repo>/simple/
+    permissions:
+      contents: read
+      id-token: write
+    secrets: inherit
+```
+
+`python-index-url` carries the `oauth2accesstoken@` username GAR's `keyring` backend needs
+to authenticate — an input, not a default, for the same reason the Docker registry is one
+in `service-image.yml`: this repository is public and names no infrastructure.
+
+**`uv`'s keyring integration needs a `keyring` executable on PATH, not just the package.**
+`uv pip install --keyring-provider subprocess` shells out to a binary named `keyring`; it
+does not call the Python API directly. `pip install keyring keyrings.google-artifactregistry-auth`
+puts the package on `sys.path` but the console script still has to land somewhere `PATH`
+reaches — found live (R0-WS1-003) the first time anything but an operator's own already-
+broad `gcloud` credentials tried this install, and the reason this workflow runs that
+`pip install` as a plain shell step rather than trusting it to already be satisfied.
+
 ## `service-image.yml`
 
 Building and signing the image is a **separate** workflow, and that split is not tidiness.
