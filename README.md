@@ -54,6 +54,9 @@ A service that ships an image adds:
       service: job-service
       registry: <host>/<project>/<repo>
       registry-host: <host>
+      # dockerfile: deploy/Dockerfile   # optional, this is the default — set it when a
+      #                                 # repository builds more than one image under
+      #                                 # different names (e.g. web's Storybook image)
     permissions:
       contents: read
       id-token: write

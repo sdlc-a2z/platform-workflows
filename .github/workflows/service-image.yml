@@ -12,6 +12,7 @@
 #         service: job-service
 #         registry: <host>/<project>/<repo>
 #         registry-host: <host>
+#         dockerfile: deploy/Dockerfile   # optional, this is the default
 #       permissions: { contents: read, id-token: write, packages: write }
 #       secrets: inherit
 
@@ -31,6 +32,11 @@ on:
       registry-host:
         description: Registry host alone, for the docker login
         required: true
+        type: string
+      dockerfile:
+        description: Path to the Dockerfile, for a repository building more than one
+          image (e.g. the real app and a docs/tooling image) under different names.
+        default: deploy/Dockerfile
         type: string
 
 jobs:
@@ -70,7 +76,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: deploy/Dockerfile
+          file: ${{ inputs.dockerfile }}
           push: true
           tags: ${{ inputs.registry }}/${{ inputs.service }}:${{ github.sha }}
           build-args: VERSION=${{ github.sha }}
