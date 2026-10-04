@@ -127,7 +127,15 @@ jobs:
           # The suites t.Fatal rather than skip when CI is set, so the tenancy guarantee
           # can never go untested behind a green build.
           CI: true
-          DATABASE_URL: postgres://sdlc:ephemeral-ci-only@localhost:5442/sdlc
+          # The unprivileged role, not sdlc (the bootstrap superuser) — found live, the
+          # first time a generated service's own tenancytest suite (which reads
+          # DATABASE_URL directly, R0-WS2-007's shared harness) actually ran against this
+          # workflow rather than platform-lib-go's own suite, which never reads
+          # DATABASE_URL at all and so never exercised this value. A superuser connection
+          # here would make every tenancy assertion pass while proving nothing — the exact
+          # failure mode the role two steps up exists to prevent, silently defeated by
+          # handing its own callers the wrong credential.
+          DATABASE_URL: postgres://platform_lib_app:ephemeral-ci-only@localhost:5442/sdlc
           PLATFORM_LIB_TEST_ADMIN_URL: postgres://sdlc:ephemeral-ci-only@localhost:5442/sdlc
           PLATFORM_LIB_TEST_APP_URL: postgres://platform_lib_app:ephemeral-ci-only@localhost:5442/sdlc
         run: go test ./... -race -count=1 -coverprofile=coverage.out
