@@ -102,6 +102,11 @@ A service that ships an image adds:
       #   # Binary Authorization (R0-ALL-003). cosign's own signature above is keyless and
       #   # not what REQUIRE_ATTESTATION checks; these create the separate KMS-backed
       #   # attestation that admission actually verifies.
+      # go-private: github.com/sdlc-a2z/platform-contracts,github.com/sdlc-a2z/platform-lib-go
+      #   # optional — only for a Go Dockerfile whose `go mod download` needs a private
+      #   # module (R0-ALL-003). CONTRACTS_READ_TOKEN / PLATFORM_LIB_GO_READ_TOKEN are
+      #   # mounted into the build as secrets regardless of this input; a Dockerfile that
+      #   # never mounts them simply never reads an unused one.
     permissions:
       contents: read
       id-token: write

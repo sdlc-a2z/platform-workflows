@@ -69,6 +69,18 @@ on:
         required: false
         default: ''
         type: string
+      go-private:
+        description: >
+          Comma-separated module path(s) to set GOPRIVATE to inside the build (e.g.
+          "github.com/sdlc-a2z/platform-contracts,github.com/sdlc-a2z/platform-lib-go").
+          Only meaningful for a Go Dockerfile whose `go mod download` needs it — leave
+          empty otherwise. The CONTRACTS_READ_TOKEN / PLATFORM_LIB_GO_READ_TOKEN secrets
+          (inherited from the caller, same as service-ci.yml's own private-module-access
+          step) are passed to the build as mounted secrets regardless of this input, and a
+          Dockerfile that never mounts them simply never reads an unused build secret.
+        required: false
+        default: ''
+        type: string
 
 jobs:
   image:
@@ -121,12 +133,19 @@ jobs:
           build-args: |
             VERSION=${{ github.sha }}
             PYTHON_INDEX_HOST=${{ inputs.python-index-host }}
-          # Reuses the same token the registry login above already fetched — Artifact
-          # Registry's Docker and Python surfaces authenticate the same identity the same
-          # way, so this needs no second auth step. A no-op (empty secret value) when
-          # python-index-host is empty; the Dockerfile ignores an empty/absent secret.
+            GOPRIVATE=${{ inputs.go-private }}
+          # gar_token reuses the same token the registry login above already fetched —
+          # Artifact Registry's Docker and Python surfaces authenticate the same identity
+          # the same way, so this needs no second auth step. contracts_token and
+          # platform_lib_go_token are the Go equivalent of python-index-host: private Go
+          # module credentials a Go Dockerfile's `go mod download` needs, that an isolated
+          # BuildKit container has no ambient copy of. Every one of these is a no-op
+          # (empty secret value) when the corresponding input/secret is unset; a
+          # Dockerfile that never mounts a given secret simply never reads it.
           secrets: |
             gar_token=${{ steps.auth.outputs.access_token }}
+            contracts_token=${{ secrets.CONTRACTS_READ_TOKEN }}
+            platform_lib_go_token=${{ secrets.PLATFORM_LIB_GO_READ_TOKEN }}
           provenance: true
           sbom: true
 
