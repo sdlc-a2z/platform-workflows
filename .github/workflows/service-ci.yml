@@ -65,15 +65,18 @@ jobs:
 
       # GITHUB_TOKEN never reaches another repository — it is scoped to the one this
       # workflow runs in, by GitHub's own design, no permissions block can widen that. Any
-      # Go service that imports platform-contracts (R0-WS2-008 / ADR-0010: it is private,
-      # generated code resolves from source at a tag, not from a registry) needs a real
-      # credential to fetch it. A shell-level check rather than a step `if:`, because the
-      # `secrets` context is not available in a step's `if:` condition at all — actionlint
-      # catches this at lint time, not just at a run silently doing nothing. Silent no-op
-      # when the secret is not set, so this costs nothing to the many callers that do not
-      # import platform-contracts.
+      # Go service that imports platform-contracts and/or platform-lib-go (R0-WS2-008 /
+      # ADR-0010: both private, generated code resolves from source at a tag, not from a
+      # registry — and platform-lib-go itself has a genuine transitive dependency on
+      # platform-contracts, so a caller that only imports platform-lib-go still needs both
+      # credentials, R0-WS2-013) needs a real credential to fetch whichever it imports. A
+      # shell-level check rather than a step `if:`, because the `secrets` context is not
+      # available in a step's `if:` condition at all — actionlint catches this at lint
+      # time, not just at a run silently doing nothing. Each credential is independent and
+      # silently no-ops on its own when its secret is not set, so this costs nothing to a
+      # caller that imports neither, one, or both.
       #
-      # CONTRACTS_READ_TOKEN must be set per-repository, not as an org secret: on GitHub
+      # Each *_READ_TOKEN must be set per-repository, not as an org secret: on GitHub
       # Free, an organization secret is never visible to a private repository regardless
       # of its visibility setting — it only reaches public repos on this plan. Confirmed
       # live: set org-wide with visibility "all", still arrived here as an empty string.
@@ -82,10 +85,19 @@ jobs:
       - name: Private module access
         env:
           CONTRACTS_READ_TOKEN: ${{ secrets.CONTRACTS_READ_TOKEN }}
+          PLATFORM_LIB_GO_READ_TOKEN: ${{ secrets.PLATFORM_LIB_GO_READ_TOKEN }}
         run: |
+          private=""
           if [ -n "$CONTRACTS_READ_TOKEN" ]; then
             git config --global "url.https://x-access-token:${CONTRACTS_READ_TOKEN}@github.com/sdlc-a2z/platform-contracts.insteadOf" "https://github.com/sdlc-a2z/platform-contracts"
-            echo "GOPRIVATE=github.com/sdlc-a2z/platform-contracts" >> "$GITHUB_ENV"
+            private="github.com/sdlc-a2z/platform-contracts"
+          fi
+          if [ -n "$PLATFORM_LIB_GO_READ_TOKEN" ]; then
+            git config --global "url.https://x-access-token:${PLATFORM_LIB_GO_READ_TOKEN}@github.com/sdlc-a2z/platform-lib-go.insteadOf" "https://github.com/sdlc-a2z/platform-lib-go"
+            private="${private:+$private,}github.com/sdlc-a2z/platform-lib-go"
+          fi
+          if [ -n "$private" ]; then
+            echo "GOPRIVATE=$private" >> "$GITHUB_ENV"
           fi
 
       - name: Formatting
