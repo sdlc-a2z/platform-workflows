@@ -51,6 +51,24 @@ on:
         required: false
         default: ''
         type: string
+      binauthz-attestor:
+        description: >
+          Full Binary Authorization attestor resource name (e.g.
+          "projects/<project>/attestors/<name>"). An input, not a default, for the same
+          reason `registry` is one. Leave empty for a repository whose cluster doesn't
+          enforce Binary Authorization yet — the attestation step below then no-ops.
+        required: false
+        default: ''
+        type: string
+      binauthz-kms-keyversion:
+        description: >
+          Full Cloud KMS CryptoKeyVersion resource name backing `binauthz-attestor` (e.g.
+          "projects/<project>/locations/global/keyRings/<ring>/cryptoKeys/<key>/cryptoKeyVersions/1").
+          Required together with `binauthz-attestor`; this step is a no-op if either is
+          empty, never a partial attempt with one and not the other.
+        required: false
+        default: ''
+        type: string
 
 jobs:
   image:
@@ -82,6 +100,14 @@ jobs:
           username: oauth2accesstoken
           password: ${{ steps.auth.outputs.access_token }}
 
+      # Only the `gcloud beta container binauthz attestations sign-and-create` step below
+      # uses this — auth@v2 alone gives ADC and an access token, never the gcloud binary
+      # itself. install_components pulls `beta` since sign-and-create has no GA surface.
+      - uses: google-github-actions/setup-gcloud@v2
+        if: inputs.binauthz-attestor != '' && inputs.binauthz-kms-keyversion != ''
+        with:
+          install_components: beta
+
       # Pushed and referenced by digest, never by tag. Argo deploys a release train of
       # digests, and a tag would let the running image change with no commit saying so.
       - name: Build and push
@@ -105,9 +131,27 @@ jobs:
           sbom: true
 
       # Keyless: the signature binds to this workflow's identity, so there is no signing
-      # key to leak. Binary Authorization admits only images carrying one.
+      # key to leak. This alone is NOT what Binary Authorization's admission check
+      # verifies, though — a keyless, Fulcio-issued certificate has no static public key
+      # for an attestor to hold, so it can prove provenance (anyone can check it was built
+      # here) without being the credential a cluster's admission policy can require. The
+      # KMS-backed attestation below is the separate, additional thing that is.
       - name: Sign the digest
         run: cosign sign --yes "${{ inputs.registry }}/${{ inputs.service }}@${{ steps.build.outputs.digest }}"
+
+      # The credential Binary Authorization's REQUIRE_ATTESTATION admission rule actually
+      # checks — a signature over this specific digest made with a static KMS key the
+      # attestor trusts, which cosign's own keyless signature above cannot be (see its
+      # comment). `gcloud beta`: `sign-and-create` has no GA surface yet. A no-op, not a
+      # failure, when the caller's cluster doesn't enforce Binary Authorization — most
+      # repos don't set these two inputs at all.
+      - name: Create a Binary Authorization attestation
+        if: inputs.binauthz-attestor != '' && inputs.binauthz-kms-keyversion != ''
+        run: |
+          gcloud beta container binauthz attestations sign-and-create \
+            --artifact-url="${{ inputs.registry }}/${{ inputs.service }}@${{ steps.build.outputs.digest }}" \
+            --attestor="${{ inputs.binauthz-attestor }}" \
+            --keyversion="${{ inputs.binauthz-kms-keyversion }}"
 
       # Values reach the script through `env:`, not by interpolating `${{ }}` into it.
       # A `${{ }}` in a `run:` block is textual substitution performed before the shell

@@ -96,6 +96,12 @@ A service that ships an image adds:
       #   # (aisdlc-platform-lib). The access token already fetched below is passed to the
       #   # build as the `gar_token` secret, so the Dockerfile authenticates without a
       #   # second credential and without the token landing in build history.
+      # binauthz-attestor: projects/<project>/attestors/<name>
+      # binauthz-kms-keyversion: projects/<project>/locations/global/keyRings/<ring>/cryptoKeys/<key>/cryptoKeyVersions/1
+      #   # optional, and only together — only for a repository whose cluster enforces
+      #   # Binary Authorization (R0-ALL-003). cosign's own signature above is keyless and
+      #   # not what REQUIRE_ATTESTATION checks; these create the separate KMS-backed
+      #   # attestation that admission actually verifies.
     permissions:
       contents: read
       id-token: write
