@@ -168,7 +168,13 @@ jobs:
           DATABASE_URL: postgres://platform_lib_app:ephemeral-ci-only@localhost:5442/sdlc
           PLATFORM_LIB_TEST_ADMIN_URL: postgres://sdlc:ephemeral-ci-only@localhost:5442/sdlc
           PLATFORM_LIB_TEST_APP_URL: postgres://platform_lib_app:ephemeral-ci-only@localhost:5442/sdlc
-        run: go test ./... -race -count=1 -coverprofile=coverage.out
+        # -coverpkg=./...: without it, `go test ./...` only attributes coverage to the
+        # package a test file lives in. identity-service's real logic lives in
+        # internal/handlers and internal/store, exercised only by test/component (a
+        # separate package, R0-WS2-007's convention for black-box tenancy/CRUD tests) —
+        # found live, the first caller whose coverage came entirely from a separate test
+        # package, reporting 0.0% total while every assertion passed.
+        run: go test ./... -race -count=1 -coverprofile=coverage.out -coverpkg=./...
 
       - name: Coverage gate
         run: |
