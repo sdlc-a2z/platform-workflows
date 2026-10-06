@@ -34,6 +34,10 @@ on:
         description: Start Postgres and the unprivileged role the tenancy suite needs
         default: true
         type: boolean
+      needs-redis:
+        description: Start Redis — opt-in, unlike Postgres, since most services don't need it (R1-WS2-002, identity-service's permission cache, is the first that does)
+        default: false
+        type: boolean
 
 jobs:
   test:
@@ -55,6 +59,17 @@ jobs:
         options: >-
           --health-cmd "pg_isready -U sdlc -d sdlc"
           --health-interval 2s --health-timeout 3s --health-retries 20
+      # GitHub Actions has no way to start a services: container conditionally on an
+      # input — the map is evaluated once per job, unconditionally, the same reason
+      # postgres above always starts regardless of needs-postgres's value. A tiny
+      # redis:7-alpine costs nothing for a caller that never reads REDIS_ADDR.
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6390:6379
+        options: >-
+          --health-cmd "redis-cli ping" --health-interval 2s
+          --health-timeout 3s --health-retries 20
 
     steps:
       - uses: actions/checkout@v4
@@ -168,6 +183,9 @@ jobs:
           DATABASE_URL: postgres://platform_lib_app:ephemeral-ci-only@localhost:5442/sdlc
           PLATFORM_LIB_TEST_ADMIN_URL: postgres://sdlc:ephemeral-ci-only@localhost:5442/sdlc
           PLATFORM_LIB_TEST_APP_URL: postgres://platform_lib_app:ephemeral-ci-only@localhost:5442/sdlc
+          # Always set, same as DATABASE_URL above: a caller that never reads it pays
+          # nothing, and the redis: service above always runs regardless of needs-redis.
+          REDIS_ADDR: localhost:6390
         # -coverpkg=./...: without it, `go test ./...` only attributes coverage to the
         # package a test file lives in. identity-service's real logic lives in
         # internal/handlers and internal/store, exercised only by test/component (a
