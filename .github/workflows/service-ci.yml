@@ -131,7 +131,12 @@ jobs:
       - name: Run migrations
         if: inputs.needs-postgres
         env:
-          DATABASE_URL: postgres://sdlc:ephemeral-ci-only@localhost:5442/sdlc
+          # sslmode=disable: golang-migrate's postgres driver defaults to require, and
+          # this ephemeral container has no TLS at all — found live, the first time this
+          # step actually ran against real migrations ("pq: SSL is not enabled on the
+          # server"). The pgx-based Go code elsewhere in this job defaults to prefer,
+          # which is why only this step needs it spelled out.
+          DATABASE_URL: postgres://sdlc:ephemeral-ci-only@localhost:5442/sdlc?sslmode=disable
         run: |
           if ls migrations/*.up.sql >/dev/null 2>&1; then
             go run -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@latest \
