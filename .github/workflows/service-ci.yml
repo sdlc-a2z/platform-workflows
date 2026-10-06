@@ -122,6 +122,24 @@ jobs:
             "DO \$\$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='platform_lib_app') \
              THEN CREATE ROLE platform_lib_app LOGIN PASSWORD 'ephemeral-ci-only' NOBYPASSRLS; END IF; END \$\$;"
 
+      # Found live on identity-service, the first generated service with a real schema:
+      # no service before it had migrations to run, so this step never existed and
+      # nothing noticed. Runs as the bootstrap superuser (DDL rights the unprivileged
+      # role above deliberately does not have), and is a silent no-op for a service with
+      # no migrations/ directory yet, matching this workflow's own pattern for inputs a
+      # given caller does not use.
+      - name: Run migrations
+        if: inputs.needs-postgres
+        env:
+          DATABASE_URL: postgres://sdlc:ephemeral-ci-only@localhost:5442/sdlc
+        run: |
+          if ls migrations/*.up.sql >/dev/null 2>&1; then
+            go run -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@latest \
+              -path migrations -database "$DATABASE_URL" up
+          else
+            echo "no migrations/ directory — nothing to run"
+          fi
+
       - name: Test
         env:
           # The suites t.Fatal rather than skip when CI is set, so the tenancy guarantee
