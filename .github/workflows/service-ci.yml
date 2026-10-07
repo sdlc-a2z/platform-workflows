@@ -143,6 +143,14 @@ jobs:
           # ("permission denied for table organizations").
           psql -h localhost -p 5442 -U sdlc -d sdlc -v ON_ERROR_STOP=1 -c \
             "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO platform_lib_app;"
+          # A bigserial (or any serial) primary key needs its own sequence grant —
+          # TABLES above does not imply it. Found live generating artifact-service:
+          # outbox.id is bigserial (this suite's own migration, every caller carries
+          # it), and the first real write through outbox.Write failed with "permission
+          # denied for sequence outbox_id_seq" despite the table grant above already
+          # being in place.
+          psql -h localhost -p 5442 -U sdlc -d sdlc -v ON_ERROR_STOP=1 -c \
+            "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO platform_lib_app;"
 
       # Found live on identity-service, the first generated service with a real schema:
       # no service before it had migrations to run, so this step never existed and
