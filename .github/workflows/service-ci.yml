@@ -137,21 +137,34 @@ jobs:
 
       # An unprivileged role, because a superuser bypasses RLS: the tenancy suite would
       # pass while proving nothing, which is the commonest way such a suite lies.
+      #
+      # Named after the calling service ("<service>_app", quoted — a repo name is
+      # kebab-case and Postgres identifiers cannot contain a bare hyphen), not the
+      # literal "platform_lib_app" this step hardcoded until R1-WS2-008: that name was
+      # harmless for every caller whose own migrations never referenced a role by name
+      # (RLS policies key off current_setting, not the role's own identity) — until
+      # audit-service's own migration did (`REVOKE UPDATE, DELETE, TRUNCATE ON
+      # audit_events FROM "audit-service_app"`), and "Run migrations" failed with `role
+      # "audit-service_app" does not exist`, found live, not in review. Every prior
+      # caller's own `DATABASE_URL`/`PLATFORM_LIB_TEST_APP_URL` below changes role name
+      # too, but not behaviour: nothing anywhere else hardcodes "platform_lib_app" as a
+      # literal string (platform-lib-go's own relay-role migration reads a role name
+      # from `current_setting('app.relay_role', true)` at runtime, never hardcoded).
       - name: Create the unprivileged test role
         if: inputs.needs-postgres
         env:
           PGPASSWORD: ephemeral-ci-only
         run: |
           psql -h localhost -p 5442 -U sdlc -d sdlc -v ON_ERROR_STOP=1 -c \
-            "DO \$\$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='platform_lib_app') \
-             THEN CREATE ROLE platform_lib_app LOGIN PASSWORD 'ephemeral-ci-only' NOBYPASSRLS; END IF; END \$\$;"
+            "DO \$\$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='${{ inputs.service }}_app') \
+             THEN CREATE ROLE \"${{ inputs.service }}_app\" LOGIN PASSWORD 'ephemeral-ci-only' NOBYPASSRLS; END IF; END \$\$;"
           # Must run before migrations: a default-privileges rule only applies to objects
           # created afterward, by the same role (sdlc, the connection above). Without it,
-          # migrations create tables platform_lib_app has no grant on at all — found live
+          # migrations create tables the app role has no grant on at all — found live
           # on identity-service, the first time a caller's migration actually ran here
           # ("permission denied for table organizations").
           psql -h localhost -p 5442 -U sdlc -d sdlc -v ON_ERROR_STOP=1 -c \
-            "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO platform_lib_app;"
+            "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO \"${{ inputs.service }}_app\";"
           # A bigserial (or any serial) primary key needs its own sequence grant —
           # TABLES above does not imply it. Found live generating artifact-service:
           # outbox.id is bigserial (this suite's own migration, every caller carries
@@ -159,7 +172,7 @@ jobs:
           # denied for sequence outbox_id_seq" despite the table grant above already
           # being in place.
           psql -h localhost -p 5442 -U sdlc -d sdlc -v ON_ERROR_STOP=1 -c \
-            "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO platform_lib_app;"
+            "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO \"${{ inputs.service }}_app\";"
 
       # Found live on identity-service, the first generated service with a real schema:
       # no service before it had migrations to run, so this step never existed and
@@ -197,9 +210,9 @@ jobs:
           # here would make every tenancy assertion pass while proving nothing — the exact
           # failure mode the role two steps up exists to prevent, silently defeated by
           # handing its own callers the wrong credential.
-          DATABASE_URL: postgres://platform_lib_app:ephemeral-ci-only@localhost:5442/sdlc
+          DATABASE_URL: postgres://${{ inputs.service }}_app:ephemeral-ci-only@localhost:5442/sdlc
           PLATFORM_LIB_TEST_ADMIN_URL: postgres://sdlc:ephemeral-ci-only@localhost:5442/sdlc
-          PLATFORM_LIB_TEST_APP_URL: postgres://platform_lib_app:ephemeral-ci-only@localhost:5442/sdlc
+          PLATFORM_LIB_TEST_APP_URL: postgres://${{ inputs.service }}_app:ephemeral-ci-only@localhost:5442/sdlc
           # Always set, same as DATABASE_URL above: a caller that never reads it pays
           # nothing, and the redis: service above always runs regardless of needs-redis.
           REDIS_ADDR: localhost:6390
