@@ -70,6 +70,15 @@ jobs:
         options: >-
           --health-cmd "redis-cli ping" --health-interval 2s
           --health-timeout 3s --health-retries 20
+      # Same reasoning as redis above: always on, costs nothing to a caller that never
+      # reads STORAGE_EMULATOR_HOST. fsouza/fake-gcs-server is a real implementation of
+      # the GCS API (R1-WS2-012's own choice over an in-process mock, for the same
+      # reason) — no --health-cmd here, since this image's own tooling to run one is not
+      # confirmed present; callers that need to know it's ready poll from their own step.
+      fake-gcs:
+        image: fsouza/fake-gcs-server:latest
+        ports:
+          - 4446:4443
 
     steps:
       - uses: actions/checkout@v4
@@ -194,6 +203,10 @@ jobs:
           # Always set, same as DATABASE_URL above: a caller that never reads it pays
           # nothing, and the redis: service above always runs regardless of needs-redis.
           REDIS_ADDR: localhost:6390
+          # Same reasoning: always set, the fake-gcs: service above always runs. A real
+          # GCS-API-compatible server, not a mock — R1-WS2-012's own upload-protocol
+          # test PUTs and GETs against it directly.
+          STORAGE_EMULATOR_HOST: localhost:4446
         # -coverpkg=./...: without it, `go test ./...` only attributes coverage to the
         # package a test file lives in. identity-service's real logic lives in
         # internal/handlers and internal/store, exercised only by test/component (a
